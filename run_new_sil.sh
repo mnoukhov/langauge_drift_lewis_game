@@ -3,9 +3,9 @@ K1=2000
 K2S=200
 K2L=200
 ROOT_EXP_DIR='./exps'
-CKPT_DIR="${ROOT_EXP_DIR}/zzz_ckpt"
+CKPT_DIR="${ROOT_EXP_DIR}/new_ckpt"
 GUMBEL_TEMP=10
-EXP_DIR="${ROOT_EXP_DIR}/iter_generation${K1}_transmission${K2S}-${K2L}_same_opt"
+EXP_DIR="${ROOT_EXP_DIR}/new_iter_generation${K1}_transmission${K2S}-${K2L}_same_opt"
 LOG_DIR=${EXP_DIR}
 
 python iterated_learning.py -method gumbel -ckpt_dir ${CKPT_DIR} -generation_steps ${K1} \

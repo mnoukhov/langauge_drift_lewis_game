@@ -3,6 +3,30 @@ import numpy as np
 from torch.distributions import Categorical
 
 
+class MeanBaseline:
+    """Running mean baseline; all loss batches have equal importance/weight,
+    hence it is better if they are equally-sized.
+    """
+
+    def __init__(self):
+        self.mean_baseline = torch.zeros(1, requires_grad=False)
+        self.n_points = 0.0
+
+    def update(self, loss: torch.Tensor) -> None:
+        self.n_points += 1
+        if self.mean_baseline.device != loss.device:
+            self.mean_baseline = self.mean_baseline.to(loss.device)
+
+        self.mean_baseline += (
+            loss.detach().mean().item() - self.mean_baseline
+        ) / self.n_points
+
+    def predict(self, loss: torch.Tensor) -> torch.Tensor:
+        if self.mean_baseline.device != loss.device:
+            self.mean_baseline = self.mean_baseline.to(loss.device)
+        return self.mean_baseline
+
+
 # class ExponentialMovingAverager:
 #     def __init__(self, init_mean, gamma=0.1):
 #         self.mean = init_mean
@@ -13,6 +37,7 @@ from torch.distributions import Categorical
 #         coef = self.gamma / (1 + self.num)
 #         self.mean = self.mean * coef + (1 - coef) * value
 #         self.num += 1
+
 
 class ExponentialMovingAverager:
     def __init__(self, gamma=0.1):
@@ -27,11 +52,18 @@ class ExponentialMovingAverager:
 
 
 def selfplay_batch(objs, l_opt, listener, s_opt, speaker, ema_reward=None):
-    """ Use exponential reward (kinda depricated not working)
+    """Use exponential reward (kinda depricated not working)
     :return updated average reward
     """
     # Generate batch
-    idxes = objs[:,5]*100000+objs[:,4]*10000+objs[:,3]*1000+objs[:,2]*100+objs[:,1]*10+objs[:,0]
+    idxes = (
+        objs[:, 5] * 100000
+        + objs[:, 4] * 10000
+        + objs[:, 3] * 1000
+        + objs[:, 2] * 100
+        + objs[:, 1] * 10
+        + objs[:, 0]
+    )
     s_logits = speaker(objs)
     msgs = Categorical(logits=s_logits).sample()
     oh_msgs = listener.one_hot(msgs)
@@ -48,10 +80,10 @@ def selfplay_batch(objs, l_opt, listener, s_opt, speaker, ema_reward=None):
     values = rewards.numpy()
     # Compute reward average
     if ema_reward is not None:
-        ema_reward.update(values,idxes)
+        ema_reward.update(values, idxes)
     else:
         ema_reward = ExponentialMovingAverager()
-        ema_reward.update(values,idxes)
+        ema_reward.update(values, idxes)
     s_dist = Categorical(s_logits)
     s_logprobs = s_dist.log_prob(msgs).sum(-1)
     reinforce = (rewards - torch.tensor(ema_reward.mean[idxes])) * s_logprobs
@@ -62,11 +94,10 @@ def selfplay_batch(objs, l_opt, listener, s_opt, speaker, ema_reward=None):
     return ema_reward
 
 
-def selfplay_batch_a2c(objs, l_opt, listener, s_opt, speaker, value_coef, ent_coef):
-    """ Use a learnt value function """
+def selfplay_batch_reinforce(objs, l_opt, listener, s_opt, speaker, baseline, ent_coef):
     # Generate batch
     a2c_info = speaker.a2c(objs)
-    oh_msgs = listener.one_hot(a2c_info['msgs'])
+    oh_msgs = listener.one_hot(a2c_info["msgs"])
     l_logits = listener.get_logits(oh_msgs)
 
     # Train listener
@@ -78,13 +109,44 @@ def selfplay_batch_a2c(objs, l_opt, listener, s_opt, speaker, value_coef, ent_co
 
     # Policy gradient
     rewards = l_logprobs.detach()
-    v_loss = torch.mean((a2c_info['values'] - rewards[:, None]).pow(2))
+    # v_loss = torch.mean((a2c_info["values"] - rewards[:, None]).pow(2))
 
-    adv = (rewards[:, None] - a2c_info['values']).detach()
-    reinforce = adv * a2c_info['logprobs']
+    adv = (rewards[:, None] - baseline.predict(rewards[:, None])).detach()
+    reinforce = adv * a2c_info["logprobs"]
     p_loss = -reinforce.mean()
 
-    ent_loss = -a2c_info['ents'].mean()
+    ent_loss = -a2c_info["ents"].mean()
+
+    s_opt.zero_grad()
+    (p_loss + ent_coef * ent_loss).backward()
+    s_opt.step()
+
+    baseline.update(rewards)
+
+
+def selfplay_batch_a2c(objs, l_opt, listener, s_opt, speaker, value_coef, ent_coef):
+    """Use a learnt value function"""
+    # Generate batch
+    a2c_info = speaker.a2c(objs)
+    oh_msgs = listener.one_hot(a2c_info["msgs"])
+    l_logits = listener.get_logits(oh_msgs)
+
+    # Train listener
+    l_logprobs = Categorical(logits=l_logits).log_prob(objs)
+    l_logprobs = l_logprobs.sum(-1)
+    l_opt.zero_grad()
+    (-l_logprobs.mean()).backward(retain_graph=True)
+    l_opt.step()
+
+    # Policy gradient
+    rewards = l_logprobs.detach()
+    v_loss = torch.mean((a2c_info["values"] - rewards[:, None]).pow(2))
+
+    adv = (rewards[:, None] - a2c_info["values"]).detach()
+    reinforce = adv * a2c_info["logprobs"]
+    p_loss = -reinforce.mean()
+
+    ent_loss = -a2c_info["ents"].mean()
 
     s_opt.zero_grad()
     (p_loss + value_coef * v_loss + ent_coef * ent_loss).backward()

@@ -8,17 +8,24 @@ import numpy as np
 
 
 class LewisGame:
-    fields = [('p', int, 6, 'nb properties'),
-              ('t', int, 10, 'nb types'),
-              ('su_ratio', float, 0.0038, 'ratio of objects being labeled for supervise'),
-              ('sp_ratio', float, 0.01, 'ratio of objects using selfplay. Must be >= su_ratio ')]
+    fields = [
+        ("p", int, 6, "nb properties"),
+        ("t", int, 10, "nb types"),
+        ("su_ratio", float, 0.0038, "ratio of objects being labeled for supervise"),
+        (
+            "sp_ratio",
+            float,
+            0.01,
+            "ratio of objects using selfplay. Must be >= su_ratio ",
+        ),
+    ]
 
     @staticmethod
     def get_parser(parser=None):
         if parser is None:
             parser = argparse.ArgumentParser()
         for name, dtype, val, desc in LewisGame.fields:
-            parser.add_argument('-' + name, default=val, type=dtype, help=desc)
+            parser.add_argument("-" + name, default=val, type=dtype, help=desc)
         return parser
 
     @classmethod
@@ -28,12 +35,17 @@ class LewisGame:
     def __init__(self, p, t, su_ratio, sp_ratio, **kwargs):
         assert sp_ratio >= su_ratio
         assert 0 < sp_ratio <= 1 and 0 < su_ratio <= 1
-        print('Building a game with p: {}, t: {}'.format(p, t))
+        print("Building a game with p: {}, t: {}".format(p, t))
         self.p = p
         self.t = t
         self.su_ratio = su_ratio
         self.sp_ratio = sp_ratio
-        self.all_objs = torch.LongTensor([obj for obj in product(*[[t for t in range(self.t)] for _ in range(self.p)])])
+        self.all_objs = torch.LongTensor(
+            [
+                obj
+                for obj in product(*[[t for t in range(self.t)] for _ in range(self.p)])
+            ]
+        )
 
         # The offset vector of converting to msg
         self.msg_offset = np.arange(0, self.p) * self.t
@@ -66,12 +78,15 @@ class LewisGame:
         self.msg_offset = self.msg_offset.cuda()
 
     def info(self):
-        """ Report game info """
-        print('######### Game info #############')
-        print('Game: p {} t {}'.format(self.p, self.t))
-        print('Total: {} | Supervise: {} | Selfplay: {}'.format(
-            len(self.all_indices), len(self.su_indices), len(self.sp_indices)))
-        print('#################################')
+        """Report game info"""
+        print("######### Game info #############")
+        print("Game: p {} t {}".format(self.p, self.t))
+        print(
+            "Total: {} | Supervise: {} | Selfplay: {}".format(
+                len(self.all_indices), len(self.su_indices), len(self.sp_indices)
+            )
+        )
+        print("#################################")
 
     def random_sp_objs(self, batch_size):
         indices = torch.randint(len(self.sp_indices), size=[batch_size]).long()
@@ -88,7 +103,7 @@ class LewisGame:
         return self.t * self.p
 
     def objs_to_msg(self, objs):
-        """ Generate the ground truth language for objects
+        """Generate the ground truth language for objects
         :param [bsz, nb_props]
         :return [bsz, nb_props]
         """
@@ -96,7 +111,7 @@ class LewisGame:
 
     @property
     def env_config(self):
-        return {'p': self.p, 't': self.t}
+        return {"p": self.p, "t": self.t}
 
     def get_generator(self, batch_size, names=None):
         """
@@ -104,35 +119,34 @@ class LewisGame:
         :param names: A list of name of generator. From 'su', 'sp', 'heldout'
             If None use all of them
         """
-        names = names if names is not None else ['su', 'sp', 'heldout']
+        names = names if names is not None else ["su", "sp", "heldout"]
         if isinstance(names, str):
             names = [names]
         names = set(names)
         gen_list = []
         for name in names:
-            if name == 'su':
+            if name == "su":
                 gen_list.append(self._su_generator(batch_size))
-            elif name == 'sp':
+            elif name == "sp":
                 gen_list.append(self._sp_generator(batch_size))
-            elif name == 'heldout':
+            elif name == "heldout":
                 gen_list.append(self._heldout_generator(batch_size))
             else:
-                raise ValueError('Incorrect generator name {}'.format(names))
+                raise ValueError("Incorrect generator name {}".format(names))
         return combine_generator(gen_list)
 
     def _su_generator(self, batch_size):
-        return self.create_generator(self.all_objs[self.su_indices],
-                                     self.all_msgs[self.su_indices],
-                                     batch_size)
+        return self.create_generator(
+            self.all_objs[self.su_indices], self.all_msgs[self.su_indices], batch_size
+        )
 
     def _sp_generator(self, batch_size):
-        return self.create_generator(self.all_objs[self.sp_indices],
-                                     self.all_msgs[self.sp_indices],
-                                     batch_size)
+        return self.create_generator(
+            self.all_objs[self.sp_indices], self.all_msgs[self.sp_indices], batch_size
+        )
 
     def _heldout_generator(self, batch_size):
-        """ Used for evaluation. For each validation loop, randomly pick EVALUATION_RATIO * heldout_objects
-        """
+        """Used for evaluation. For each validation loop, randomly pick EVALUATION_RATIO * heldout_objects"""
         split = int(EVALUATION_RATIO * len(self.heldout_indices))
         final_ids = self.heldout_indices[:split]
 
@@ -148,7 +162,7 @@ class LewisGame:
         np.random.shuffle(inds)
         start = 0
         while start < objs.shape[0]:
-            batch_inds = inds[start: start + batch_size]
+            batch_inds = inds[start : start + batch_size]
             batch_objs, batch_msgs = objs[batch_inds], msgs[batch_inds]
             if USE_GPU:
                 batch_objs = batch_objs.cuda()
@@ -157,12 +171,12 @@ class LewisGame:
             start += batch_size
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     game = LewisGame(p=1, t=10, su_ratio=0.2, sp_ratio=0.5)
     for obj, _ in game.su_generator(1):
-        print('su', obj)
+        print("su", obj)
     for obj, _ in game.su_generator(1):
-        print('su', obj)
+        print("su", obj)
 
     for obj, _ in game.sp_generator(1):
-        print('sp', obj)
+        print("sp", obj)

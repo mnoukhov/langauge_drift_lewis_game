@@ -13,4 +13,5 @@ slurm*
 
 exps/*
 !exps/.gitkeep
-
+wandb/
+create/

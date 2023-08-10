@@ -6,8 +6,9 @@ import numpy as np
 
 VAL_BATCH_SIZE = 1000
 LOG_STEPS = 10
-S_MAX_STEPS = 50
-L_MAX_STEPS = 30
+S_MAX_STEPS = 100
+L_MAX_STEPS = 50
+
 
 def train_listener_batch(listener, l_opt, objs, msgs):
     l_logits = listener.get_logits(listener.one_hot(msgs))
@@ -18,7 +19,7 @@ def train_listener_batch(listener, l_opt, objs, msgs):
 
 
 def train_speaker_batch(speaker, s_opt, objs, msgs):
-    """ Perform a train step """
+    """Perform a train step"""
     s_logits = speaker.get_logits(objs, msgs)
     s_logprobs = Categorical(logits=s_logits).log_prob(msgs)
     s_opt.zero_grad()
@@ -42,9 +43,9 @@ class EarlyStopper:
         return self.time == self.patience
 
 
-def train_speaker_until(acc, speaker, game):
-    """ Return a speaker trained until desired acc. If speaker is None construct a default one.
-        Acc is evaluate on sp + val
+def train_speaker_until(acc, speaker, game, max_steps=S_MAX_STEPS):
+    """Return a speaker trained until desired acc. If speaker is None construct a default one.
+    Acc is evaluate on sp + val
     """
     if USE_GPU:
         speaker = speaker.cuda()
@@ -55,25 +56,26 @@ def train_speaker_until(acc, speaker, game):
     stats = None
     try:
         while True:
-            should_stop = (step >= S_MAX_STEPS) or should_stop
+            should_stop = (step >= max_steps) or should_stop
             if should_stop:
                 break
 
-            for objs, msgs in game.get_generator(5, names='su'):
-                if step >= S_MAX_STEPS:
+            for objs, msgs in game.get_generator(5, names="su"):
+                if step >= max_steps:
                     should_stop = True
                     break
                 train_speaker_batch(speaker, s_opt, objs, msgs)
                 step += 1
                 if step % LOG_STEPS == 0:
-                    generator = game.get_generator(names=['sp', 'heldout'], batch_size=VAL_BATCH_SIZE)
-                    stats, _ = eval_speaker_loop(generator=generator,
-                                                 speaker=speaker)
+                    generator = game.get_generator(
+                        names=["sp", "heldout"], batch_size=VAL_BATCH_SIZE
+                    )
+                    stats, _ = eval_speaker_loop(generator=generator, speaker=speaker)
                     logstr = ["step {}:".format(step)]
                     for name, val in stats.items():
                         logstr.append("{}: {:.4f}".format(name, val))
-                    print(' '.join(logstr))
-                    if stats['speak/tf_acc'] >= acc:
+                    print(" ".join(logstr))
+                    if stats["speak/tf_acc"] >= acc:
                         should_stop = True
                         break
     except KeyboardInterrupt:
@@ -81,8 +83,8 @@ def train_speaker_until(acc, speaker, game):
     return speaker, stats
 
 
-def train_listener_until(acc, listener, game):
-    """ Train listener until desired acc """
+def train_listener_until(acc, listener, game, max_steps=L_MAX_STEPS):
+    """Train listener until desired acc"""
     if USE_GPU:
         listener = listener.cuda()
     l_opt = torch.optim.Adam(lr=1e-3, params=listener.parameters())
@@ -92,26 +94,30 @@ def train_listener_until(acc, listener, game):
     stats = None
     try:
         while True:
-            should_stop = (step >= L_MAX_STEPS) or should_stop
+            should_stop = (step >= max_steps) or should_stop
             if should_stop:
                 break
 
-            for objs, msgs in game.get_generator(5, 'su'):
-                if step >= L_MAX_STEPS:
+            for objs, msgs in game.get_generator(5, "su"):
+                if step >= max_steps:
                     should_stop = True
                     break
                 train_listener_batch(listener, l_opt, objs, msgs)
                 step += 1
-                generator = game.get_generator(names=['sp', 'heldout'], batch_size=VAL_BATCH_SIZE)
-                stats, _ = eval_listener_loop(generator=generator,
-                                              listener=listener)
-                logstr = ["step {}:".format(step)]
-                for name, val in stats.items():
-                    logstr.append("{}: {:.4f}".format(name, val))
-                print(' '.join(logstr))
-                if stats['listen/acc'] >= acc:
-                    should_stop = True
-                    break
+                if step % LOG_STEPS == 0:
+                    generator = game.get_generator(
+                        names=["sp", "heldout"], batch_size=VAL_BATCH_SIZE
+                    )
+                    stats, _ = eval_listener_loop(
+                        generator=generator, listener=listener
+                    )
+                    logstr = ["step {}:".format(step)]
+                    for name, val in stats.items():
+                        logstr.append("{}: {:.4f}".format(name, val))
+                    print(" ".join(logstr))
+                    if stats["listen/acc"] >= acc:
+                        should_stop = True
+                        break
     except KeyboardInterrupt:
         pass
 
